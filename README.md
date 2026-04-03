@@ -68,7 +68,6 @@ echo "GOOGLE_API_KEY=your_gemini_api_key_here" > .env
 # Start the FastAPI application server
 uvicorn bridge.api_server:app --port 8000 --host 0.0.0.0 --reload
 ```
-*The API interface will be accessible at http://localhost:8000.*
 
 ### 2. Frontend Initialization (React/Vite)
 
@@ -83,7 +82,6 @@ npm install
 # Start the Vite development server
 npm run dev
 ```
-*The graphical client will be accessible at http://localhost:5173.*
 
 ---
 
