@@ -1,6 +1,7 @@
 import os
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from data.manifesto_bank import MANIFESTO_BANK
 
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
@@ -41,6 +42,10 @@ def restart_game_state():
             })
     db.voter_shares.insert_many(initial_shares)
     
+    # 5. Reset Manifesto Bank
+    for m in MANIFESTO_BANK:
+        m["used_by"] = None
+
     print("✅ Database Reset: Data initialized with Roles and Archetypes.")
 
 if __name__ == "__main__":
