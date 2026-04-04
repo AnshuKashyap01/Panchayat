@@ -33,7 +33,7 @@ const gameState = {
         name: 'Player',
         party: 'Jan Seva Party',
         popularity: 2,
-        coins: 1250,
+        coins: 200,
         level: 1
     },
     manifesto: [],         // Player's chosen manifestos
@@ -63,7 +63,13 @@ const DOM = {
     sidebarOverlay: document.getElementById('sidebarOverlay'),
     opponentsSidebar: document.getElementById('opponentsSidebar'),
     sidebarCloseBtn: document.getElementById('sidebarCloseBtn'),
-    sidebarScroll: document.getElementById('sidebarScroll')
+    sidebarScroll: document.getElementById('sidebarScroll'),
+    restartGameBtn: document.getElementById('restartGameBtn'),
+    restartOverlay: document.getElementById('restartOverlay'),
+    confirmRestartBtn: document.getElementById('confirmRestartBtn'),
+    cancelRestartBtn: document.getElementById('cancelRestartBtn'),
+    candidateName: document.getElementById('candidateName'),
+    candidateParty: document.getElementById('candidateParty')
 };
 
 
@@ -73,7 +79,8 @@ const DOM = {
 
 async function apiFetch(endpoint, options = {}) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
+    const timeoutMs = options.timeoutMs || 2000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // default 2s timeout
 
     try {
         const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -114,6 +121,11 @@ async function applyManifesto(groupId, shiftAmount) {
 /** GET /api/total-standing → aggregated voter shares per candidate */
 async function fetchTotalStanding() {
     return apiFetch('/api/total-standing');
+}
+
+/** GET /api/all-shares → detailed voter shares */
+async function fetchAllShares() {
+    return apiFetch('/api/all-shares');
 }
 
 /** POST /api/play-turn → run a full game turn */
@@ -207,6 +219,28 @@ class PixelParticleSystem {
 // ══════════════════════════════════
 
 async function init() {
+    // Player Setup
+    let pName = localStorage.getItem('playerName');
+    let pParty = localStorage.getItem('playerParty');
+    if (!pName || !pParty) {
+        pName = prompt("Enter your Candidate Name:", "Player") || "Player";
+        pParty = prompt("Enter your Party Name:", "Jan Seva Party") || "Jan Seva Party";
+        localStorage.setItem('playerName', pName);
+        localStorage.setItem('playerParty', pParty);
+    }
+    gameState.candidate.name = pName;
+    gameState.candidate.party = pParty;
+    DOM.candidateName.textContent = pName;
+    DOM.candidateParty.textContent = pParty;
+
+    let savedCoins = localStorage.getItem('playerCoins');
+    if (savedCoins) {
+        gameState.candidate.coins = parseInt(savedCoins, 10);
+    } else {
+        localStorage.setItem('playerCoins', gameState.candidate.coins);
+    }
+    DOM.coinCount.textContent = gameState.candidate.coins.toLocaleString();
+
     // Start pixel particles
     const particleSystem = new PixelParticleSystem(DOM.pixelCanvas);
     particleSystem.start();
@@ -238,33 +272,47 @@ async function loadManifestoBank() {
     gameState.manifestoBank = bank;
 }
 
-/** Load voter standing from /api/total-standing */
+/** Load voter standing from /api/total-standing and /api/all-shares */
 async function loadVoterStanding() {
-    const standings = await fetchTotalStanding();
+    try {
+        const allSharesRaw = await fetchAllShares();
+        
+        gameState.allShares = {};
+        allSharesRaw.forEach(s => {
+            if (!gameState.allShares[s.group_id]) {
+                gameState.allShares[s.group_id] = {};
+            }
+            gameState.allShares[s.group_id][s.candidate_id] = s.share;
+        });
 
-    // standings = [{_id: candidate_id, total_support: number}, ...]
-    // total_support is the SUM across all 5 groups for that candidate
-    // Player starts at 4% × 5 groups = 20% total
-    const playerStanding = standings.find(s => s._id === PLAYER_CANDIDATE_ID);
-
-    // Since total-standing is aggregate, estimate per-group from local allShares
-    // If we have local allShares, use those; otherwise estimate from aggregate
-    if (Object.keys(gameState.allShares).length > 0) {
         gameState.voterShares = VOTER_GROUPS.map(group => ({
             ...group,
-            percent: gameState.allShares[group.id]?.[PLAYER_CANDIDATE_ID] ?? INITIAL_SHARE
+            percent: Math.round((gameState.allShares[group.id]?.[PLAYER_CANDIDATE_ID] ?? INITIAL_SHARE) * 100) / 100
         }));
-    } else {
-        // First load — distribute total equally across groups
-        gameState.voterShares = VOTER_GROUPS.map(group => ({
-            ...group,
-            percent: playerStanding
-                ? Math.round((playerStanding.total_support / VOTER_GROUPS.length) * 100) / 100
-                : INITIAL_SHARE
-        }));
+
+        gameState.standings = await fetchTotalStanding();
+    } catch (err) {
+        console.warn('Could not fetch granular shares from server, using fallback');
+        
+        const standings = await fetchTotalStanding();
+        const playerStanding = standings.find(s => s._id === PLAYER_CANDIDATE_ID);
+        
+        if (Object.keys(gameState.allShares).length === 0) {
+            gameState.voterShares = VOTER_GROUPS.map(group => ({
+                ...group,
+                percent: playerStanding
+                    ? Math.round((playerStanding.total_support / VOTER_GROUPS.length) * 100) / 100
+                    : INITIAL_SHARE
+            }));
+        } else {
+            gameState.voterShares = VOTER_GROUPS.map(group => ({
+                ...group,
+                percent: gameState.allShares[group.id]?.[PLAYER_CANDIDATE_ID] ?? INITIAL_SHARE
+            }));
+        }
+
+        gameState.standings = standings;
     }
-
-    gameState.standings = standings;
 }
 
 /**
@@ -500,6 +548,31 @@ function bindEvents() {
     DOM.addManifestoBtn.addEventListener('mouseleave', () => {
         DOM.addManifestoBtn.style.transform = '';
     });
+
+    // Restart game bindings
+    DOM.restartGameBtn.addEventListener('click', () => {
+        DOM.restartOverlay.classList.add('active');
+    });
+    DOM.cancelRestartBtn.addEventListener('click', () => {
+        DOM.restartOverlay.classList.remove('active');
+    });
+    DOM.confirmRestartBtn.addEventListener('click', restartGameAction);
+}
+
+async function restartGameAction() {
+    try {
+        await apiFetch('/api/restart-game', { method: 'POST', timeoutMs: 15000 });
+        showToast('🔄', 'Game Restarted!');
+        localStorage.clear();
+        // Reload page to reset coins and flush RAM state entirely
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    } catch (err) {
+        console.error('Failed to restart:', err);
+        showToast('❌', 'Error restarting game');
+        DOM.restartOverlay.classList.remove('active');
+    }
 }
 
 function openPopup() {
@@ -668,10 +741,24 @@ async function addToCampaign() {
 
             // Update coin count
             gameState.candidate.coins -= addedCount * 50;
+            localStorage.setItem('playerCoins', gameState.candidate.coins);
             DOM.coinCount.textContent = gameState.candidate.coins.toLocaleString();
 
-            // Let API calls finish in background (don't block UI)
-            Promise.allSettled(apiSyncTasks);
+            // Let API calls finish
+            await Promise.allSettled(apiSyncTasks);
+            
+            // NPC Turn
+            try {
+                const npcRes = await apiFetch('/api/end-turn', { method: 'POST', timeoutMs: 15000 });
+                if (npcRes.npc_actions && npcRes.npc_actions.length > 0) {
+                    showToast('⚔️', 'Opponents have made their moves!');
+                    await loadVoterStanding();
+                    renderBarChart();
+                    renderOpponentsSidebar();
+                }
+            } catch (err) {
+                console.error("NPC turn failed:", err);
+            }
 
         } else if (gameState.selectedPopupOptions.length === 0 && !customText) {
             DOM.popupActionBtn.style.animation = 'shake 0.4s ease-out';

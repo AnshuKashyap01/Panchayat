@@ -46,6 +46,7 @@
                 <span class="coin-icon">🪙</span>
                 <span class="coin-count" id="coinCount">1,250</span>
             </div>
+            <button class="settings-btn restart-btn" id="restartGameBtn" title="Restart Game">🔄</button>
             <button class="settings-btn" id="settingsBtn">⚙️</button>
         </div>
     </header>
@@ -127,7 +128,7 @@
         <!-- ADD MANIFESTO BUTTON (bottom-right) -->
         <button class="add-manifesto-btn" id="addManifestoBtn">
             <span class="btn-plus">✚</span>
-            <span class="btn-label">ADD MANIFESTO</span>
+            <span class="btn-label">ADD MANIFESTO (50 🪙)</span>
         </button>
     </main>
 
@@ -159,6 +160,24 @@
     <div class="toast" id="toast">
         <span class="toast-icon">🎉</span>
         <span class="toast-msg" id="toastMsg">Promise Added!</span>
+    </div>
+
+    <!-- ═══ RESTART CONFIRMATION POPUP ═══ -->
+    <div class="popup-overlay" id="restartOverlay">
+        <div class="popup-panel" style="max-height: 250px; text-align: center;">
+            <div class="panel-card-title" style="color: #e04848; margin-bottom: 20px;">⚠️ WARNING ⚠️</div>
+            <p style="font-family: 'Press Start 2P'; font-size: 10px; color: #fff; line-height: 1.5; margin-bottom: 30px;">
+                Are you sure you want to restart?<br><br>All progress will be lost!
+            </p>
+            <div style="display: flex; gap: 15px; justify-content: center;">
+                <button class="popup-action-btn" id="confirmRestartBtn" style="background: #e04848; width: 120px; box-shadow: 0 4px 0 #902020;">
+                    <span class="popup-action-text">YES</span>
+                </button>
+                <button class="popup-action-btn" id="cancelRestartBtn" style="background: #e8a040; width: 120px; box-shadow: 0 4px 0 #986010;">
+                    <span class="popup-action-text">NO</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <script src="game.js"></script>
