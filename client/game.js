@@ -59,7 +59,7 @@ class SoundManager {
         this.bgmGain = null;
         this.uiGain = null;
         this.buffers = {};
-        
+
         // Active sources
         this.activeBGM = null;
         this.activeAmbient = null;
@@ -71,12 +71,12 @@ class SoundManager {
             this.masterGain = this.ctx.createGain();
             this.bgmGain = this.ctx.createGain();
             this.uiGain = this.ctx.createGain();
-            
+
             // Routing
             this.bgmGain.connect(this.masterGain);
             this.uiGain.connect(this.masterGain);
             this.masterGain.connect(this.ctx.destination);
-            
+
             // Set default volumes
             this.bgmGain.gain.value = 0.015; // Extremely low, subtle ambient background
             this.uiGain.gain.value = 0.6;
@@ -92,7 +92,7 @@ class SoundManager {
     toggleMute() {
         gameState.isMuted = !gameState.isMuted;
         this._updateMuteState();
-        if(!gameState.isMuted && this.ctx && this.ctx.state === 'suspended'){
+        if (!gameState.isMuted && this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume();
         }
     }
@@ -114,7 +114,7 @@ class SoundManager {
         for (const [name, path] of Object.entries(assets)) {
             try {
                 const response = await fetch(path);
-                if(response.ok) {
+                if (response.ok) {
                     const arrayBuffer = await response.arrayBuffer();
                     this.buffers[name] = await this.ctx.decodeAudioData(arrayBuffer);
                 } else {
@@ -133,7 +133,7 @@ class SoundManager {
             try { await this.ctx.resume(); } catch (e) { return; }
         }
         if (this.ctx.state !== 'running') return; // abort if still not running
-        
+
         const buffer = this.buffers[name];
         if (buffer) {
             const source = this.ctx.createBufferSource();
@@ -150,7 +150,7 @@ class SoundManager {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.connect(gain).connect(this.uiGain);
-        
+
         const now = this.ctx.currentTime;
         if (name === 'ui_hover') {
             osc.type = 'sine';
@@ -225,7 +225,7 @@ class SoundManager {
     _playProceduralBGM() {
         const frequencies = [65.41, 164.81, 196.00, 246.94]; // Cmaj7 open drone (C2, E3, G3, B3)
         const oscillators = [];
-        
+
         const masterPadGain = this.ctx.createGain();
         // Very low volume, slow 4 second fade in for smoothness
         masterPadGain.gain.setValueAtTime(0, this.ctx.currentTime);
@@ -234,7 +234,7 @@ class SoundManager {
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.value = 600; // Muffeled, warm, Sega ambient tone
-        
+
         masterPadGain.connect(filter);
         filter.connect(this.bgmGain);
 
@@ -242,7 +242,7 @@ class SoundManager {
             const osc = this.ctx.createOscillator();
             osc.type = 'triangle';
             // Detune slightly for chorusing effect
-            osc.frequency.value = freq + (idx * 0.5); 
+            osc.frequency.value = freq + (idx * 0.5);
             osc.connect(masterPadGain);
             osc.start();
             oscillators.push(osc);
@@ -257,7 +257,7 @@ class SoundManager {
                     setTimeout(() => {
                         oscillators.forEach(o => o.stop());
                     }, 2000);
-                } catch(e) {}
+                } catch (e) { }
             }
         };
     }
@@ -282,21 +282,21 @@ class SoundManager {
         const source = this.ctx.createBufferSource();
         source.buffer = buffer;
         source.loop = true;
-        
+
         // Custom ambient gain for fade ins/outs
         const ambientGain = this.ctx.createGain();
         ambientGain.gain.setValueAtTime(0, this.ctx.currentTime);
         ambientGain.gain.linearRampToValueAtTime(0.2, this.ctx.currentTime + 3);
-        
+
         source.connect(ambientGain).connect(this.masterGain);
         source.start();
-        
+
         this.activeAmbient = { source, gainNode: ambientGain };
     }
 
     _playProceduralAmbient() {
         // Synthesizing water flow using a low-pass filtered white noise
-        const bufferSize = this.ctx.sampleRate * 2; 
+        const bufferSize = this.ctx.sampleRate * 2;
         const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
         const output = noiseBuffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) {
@@ -325,16 +325,16 @@ class SoundManager {
 
     stopAmbient() {
         if (!this.activeAmbient) return;
-        
+
         const { source, gainNode } = this.activeAmbient;
-        if(gainNode && source) {
+        if (gainNode && source) {
             try {
                 gainNode.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 2);
                 setTimeout(() => {
                     source.stop();
                     this.activeAmbient = null;
                 }, 2000);
-            } catch(e){}
+            } catch (e) { }
         } else {
             this.activeAmbient = null;
         }
@@ -1033,7 +1033,7 @@ function bindEvents() {
             DOM.muteBtn.textContent = gameState.isMuted ? '🔇' : '🔊';
             DOM.muteBtn.classList.toggle('muted', gameState.isMuted);
             showToast(gameState.isMuted ? '🔇' : '🔊', gameState.isMuted ? 'Sound muted' : 'Sound enabled');
-            
+
             if (DOM.startSoundToggleBtn) {
                 DOM.startSoundToggleBtn.innerHTML = gameState.isMuted
                     ? '<span class="btn-icon">🔇</span> SOUND: OFF'
@@ -1209,7 +1209,7 @@ async function animateNpcTurns(npcActions) {
         if (action.type === "manifesto" || !action.type) {
             soundManager.play('ui_hover');
             DOM.announcerAction.textContent = "is thinking...";
-            await sleep(800);
+            await sleep(400);
 
             DOM.announcerAction.innerHTML = `Chose: <br><br> <span style="color:#fff; font-size:12px;">${action.title}</span> <br><br> <span style="color:#e04848">(+${action.shift_amount}% for ${getGroupName(action.group_id)})</span>`;
 
@@ -1223,7 +1223,7 @@ async function animateNpcTurns(npcActions) {
                 target_group_id: action.group_id,
                 shift_amount: action.shift_amount
             });
-            await sleep(1500);
+            await sleep(600);
 
             // If this NPC action has dialogue, show the dialogue popup with TTS
             if (action.dialogue && action.dialogue.trim()) {
@@ -1250,7 +1250,7 @@ async function animateNpcTurns(npcActions) {
             }
 
             DOM.announcerAction.innerHTML = `<span style="color:#e04848; font-size:12px;">💣 launched SABOTAGE against ${vicName}!</span>`;
-            await sleep(1500);
+            await sleep(800);
 
             let sabText = `<br><span style="color:#999; font-style:italic; font-size:9px;">"${action.sabotage_text || ''}"</span><br><br>`;
 
@@ -1260,7 +1260,7 @@ async function animateNpcTurns(npcActions) {
                 let damagePct = action.multiplier ? Math.round(action.multiplier * 100) : '??';
                 DOM.announcerAction.innerHTML += sabText + `<span style="color:#e04848; font-size:14px; font-weight:bold;">💥 SABOTAGE SUCCESS!</span><br><span style="color:#e8a040; font-size:9px;">${action.dialogue || ''}</span><br><span style="color:#e04848; font-size:8px;">${vicName} lost ${damagePct}% voter share!</span>`;
             }
-            await sleep(4000);
+            await sleep(2000);
         }
     }
 
@@ -1960,7 +1960,7 @@ function init() {
         btn.addEventListener('mouseenter', () => soundManager.play('ui_hover'));
         btn.addEventListener('click', () => {
             // Only play standard click if it's NOT a custom mechanic button (sabotage/manifesto handled independently)
-            if(btn.id !== 'addManifestoBtn' && btn.id !== 'sabotageBtn') {
+            if (btn.id !== 'addManifestoBtn' && btn.id !== 'sabotageBtn') {
                 soundManager.play('ui_click');
             }
         });
@@ -1970,7 +1970,7 @@ function init() {
     if (DOM.startSinglePlayerBtn) {
         DOM.startSinglePlayerBtn.addEventListener('click', () => {
             soundManager.play('ui_click');
-            
+
             // Execute the original start logic if it exists (handles game startup)
             if (typeof startSinglePlayer === 'function') {
                 startSinglePlayer();
