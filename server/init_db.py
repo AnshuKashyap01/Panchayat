@@ -26,12 +26,13 @@ def restart_game_state():
     db.voter_shares.delete_many({})
 
     # 2. Setup 5 Candidates with Roles and Archetypes
+    # Custom Indian generated voices: Male: 76erronSBRzQKnz10Li9, Female: K2Byg54sHB1oHegvENtI
     candidates = [
-        {"id": 0, "name": "Vikas Purush", "role": "npc", "archetype": "vikas_purush", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("vikas_purush")},
-        {"id": 1, "name": "Dharma Rakshak", "role": "npc", "archetype": "dharma_rakshak", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("dharma_rakshak")},
-        {"id": 2, "name": "Jan Neta", "role": "npc", "archetype": "jan_neta", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("jan_neta")},
-        {"id": 3, "name": "Mukti Devi", "role": "npc", "archetype": "mukti_devi", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("mukti_devi")},
-        {"id": 4, "name": "Player", "role": "player", "archetype": "player", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("player")},
+        {"id": 0, "name": "Vikas Purush", "role": "npc", "archetype": "vikas_purush", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("vikas_purush"), "voice_id": "76erronSBRzQKnz10Li9"},
+        {"id": 1, "name": "Dharma Rakshak", "role": "npc", "archetype": "dharma_rakshak", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("dharma_rakshak"), "voice_id": "76erronSBRzQKnz10Li9"},
+        {"id": 2, "name": "Jan Neta", "role": "npc", "archetype": "jan_neta", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("jan_neta"), "voice_id": "K2Byg54sHB1oHegvENtI"},
+        {"id": 3, "name": "Mukti Devi", "role": "npc", "archetype": "mukti_devi", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("mukti_devi"), "voice_id": "K2Byg54sHB1oHegvENtI"},
+        {"id": 4, "name": "Player", "role": "player", "archetype": "player", "manifesto_settled": False, "coins": 200, "shield_active": True, "weakness_desc": get_weakness_desc("player"), "voice_id": "76erronSBRzQKnz10Li9"},
     ]
     db.candidates.insert_many(candidates)
 

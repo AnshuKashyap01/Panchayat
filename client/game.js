@@ -42,7 +42,72 @@ const gameState = {
     allShares: {},         // Full share table: { groupId: { candidateId: share } }
     npcManifestos: { 0: [], 1: [], 2: [], 3: [] },
     turnNumber: 1,
-    selectedPopupOptions: []
+    selectedPopupOptions: [],
+    voiceMap: {},          // { candidateId: voice_id } — persisted from server
+    isMuted: false,        // Global mute toggle
+    currentAudio: null     // Currently playing Audio object for cancellation
+};
+
+// ══════════════════════════════════
+//  SOUND EFFECTS (Web Audio API)
+// ══════════════════════════════════
+
+const SoundFX = {
+    _ctx: null,
+    _getCtx() {
+        if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+        return this._ctx;
+    },
+    _play(freq, type, duration, volume = 0.3) {
+        if (gameState.isMuted) return;
+        try {
+            const ctx = this._getCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, ctx.currentTime);
+            gain.gain.setValueAtTime(volume, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + duration);
+        } catch (e) { /* ignore audio errors */ }
+    },
+    coinSpend() {
+        this._play(880, 'sine', 0.15, 0.2);
+        setTimeout(() => this._play(660, 'sine', 0.15, 0.15), 80);
+    },
+    manifestoAdd() {
+        this._play(523, 'square', 0.08, 0.15);
+        setTimeout(() => this._play(659, 'square', 0.08, 0.15), 60);
+        setTimeout(() => this._play(784, 'square', 0.12, 0.2), 120);
+    },
+    sabotageLaunch() {
+        this._play(120, 'sawtooth', 0.4, 0.25);
+        setTimeout(() => this._play(80, 'sawtooth', 0.3, 0.2), 200);
+    },
+    turnStart() {
+        this._play(440, 'sine', 0.2, 0.15);
+        setTimeout(() => this._play(554, 'sine', 0.2, 0.15), 150);
+        setTimeout(() => this._play(659, 'sine', 0.25, 0.2), 300);
+    },
+    victory() {
+        [523, 659, 784, 1047].forEach((f, i) => {
+            setTimeout(() => this._play(f, 'square', 0.2, 0.2), i * 150);
+        });
+    },
+    defeat() {
+        [440, 370, 330, 262].forEach((f, i) => {
+            setTimeout(() => this._play(f, 'sine', 0.3, 0.2), i * 200);
+        });
+    },
+    dialogueOpen() {
+        this._play(600, 'sine', 0.1, 0.1);
+        setTimeout(() => this._play(800, 'sine', 0.1, 0.1), 60);
+    },
+    click() {
+        this._play(1000, 'square', 0.05, 0.1);
+    }
 };
 
 // ── DOM References ──
@@ -100,7 +165,16 @@ const DOM = {
     cocBtn: document.getElementById('cocBtn'),
     cocOverlay: document.getElementById('cocOverlay'),
     cocCloseBtn: document.getElementById('cocCloseBtn'),
-    cocOkBtn: document.getElementById('cocOkBtn')
+    cocOkBtn: document.getElementById('cocOkBtn'),
+    // Dialogue popup
+    dialogueOverlay: document.getElementById('dialogueOverlay'),
+    dialogueSpeakerEmoji: document.getElementById('dialogueSpeakerEmoji'),
+    dialogueSpeakerName: document.getElementById('dialogueSpeakerName'),
+    dialogueText: document.getElementById('dialogueText'),
+    dialogueContinue: document.getElementById('dialogueContinue'),
+    dialogueAudioIndicator: document.getElementById('dialogueAudioIndicator'),
+    // Mute button
+    muteBtn: document.getElementById('muteBtn')
 };
 
 
@@ -110,8 +184,8 @@ const DOM = {
 
 async function apiFetch(endpoint, options = {}) {
     const controller = new AbortController();
-    const timeoutMs = options.timeoutMs || 2000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // default 2s timeout
+    const timeoutMs = options.timeoutMs || 15000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // default 15s timeout
 
     try {
         const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -274,11 +348,24 @@ async function init() {
     DOM.candidateName.textContent = pName;
     DOM.candidateParty.textContent = pParty;
 
-    let savedCoins = localStorage.getItem('playerCoins');
-    if (savedCoins) {
-        gameState.candidate.coins = parseInt(savedCoins, 10);
-    } else {
-        localStorage.setItem('playerCoins', gameState.candidate.coins);
+    // Load coins: prefer server value, fall back to localStorage, then default 200
+    try {
+        const candidatesInfo = await apiFetch('/api/candidates-info');
+        const playerInfo = candidatesInfo.find(c => c.id === PLAYER_CANDIDATE_ID);
+        if (playerInfo && playerInfo.coins !== undefined) {
+            gameState.candidate.coins = playerInfo.coins;
+            localStorage.setItem('playerCoins', gameState.candidate.coins);
+        } else {
+            let savedCoins = localStorage.getItem('playerCoins');
+            if (savedCoins) {
+                gameState.candidate.coins = parseInt(savedCoins, 10);
+            }
+        }
+    } catch (e) {
+        let savedCoins = localStorage.getItem('playerCoins');
+        if (savedCoins) {
+            gameState.candidate.coins = parseInt(savedCoins, 10);
+        }
     }
     DOM.coinCount.textContent = gameState.candidate.coins.toLocaleString();
 
@@ -301,7 +388,8 @@ async function init() {
     try {
         await Promise.all([
             loadManifestoBank(),
-            loadVoterStanding()
+            loadVoterStanding(),
+            loadVoiceMap()
         ]);
         showToast('⚔️', 'Connected to server!');
     } catch (err) {
@@ -317,6 +405,17 @@ async function init() {
     // Evaluate if game already ended previously
     if (gameState.turnNumber > 5) {
         evaluateElectionResults();
+    }
+}
+
+/** Load voice mapping from server (persisted in MongoDB) */
+async function loadVoiceMap() {
+    try {
+        const map = await apiFetch('/api/voice-map');
+        gameState.voiceMap = map;
+        console.log('🔊 Voice map loaded:', map);
+    } catch (err) {
+        console.warn('Could not load voice map:', err.message);
     }
 }
 
@@ -666,21 +765,52 @@ function bindEvents() {
     DOM.cocOverlay.addEventListener('click', (e) => {
         if (e.target === DOM.cocOverlay) DOM.cocOverlay.classList.remove('active');
     });
+
+    // Mute toggle
+    if (DOM.muteBtn) {
+        // Restore mute state
+        gameState.isMuted = localStorage.getItem('gameMuted') === 'true';
+        if (gameState.isMuted) {
+            DOM.muteBtn.textContent = '🔇';
+            DOM.muteBtn.classList.add('muted');
+        }
+        DOM.muteBtn.addEventListener('click', () => {
+            gameState.isMuted = !gameState.isMuted;
+            localStorage.setItem('gameMuted', gameState.isMuted);
+            DOM.muteBtn.textContent = gameState.isMuted ? '🔇' : '🔊';
+            DOM.muteBtn.classList.toggle('muted', gameState.isMuted);
+            // Stop currently playing audio if muted
+            if (gameState.isMuted && gameState.currentAudio) {
+                gameState.currentAudio.pause();
+                gameState.currentAudio = null;
+            }
+            showToast(gameState.isMuted ? '🔇' : '🔊', gameState.isMuted ? 'Sound muted' : 'Sound enabled');
+        });
+    }
 }
 
 async function restartGameAction() {
+    // Close the restart overlay immediately so user sees feedback
+    DOM.restartOverlay.classList.remove('active');
+    showToast('🔄', 'Restarting game...');
+    
     try {
         await apiFetch('/api/restart-game', { method: 'POST', timeoutMs: 30000 });
-        showToast('🔄', 'Game Restarted!');
+        // Clear ALL localStorage (coins, turn, name, party, mute, etc.)
         localStorage.clear();
-        // Reload page to reset coins and flush RAM state entirely
+        showToast('✅', 'Game Restarted!');
+        // Reload page to reset everything
         setTimeout(() => {
             window.location.reload();
-        }, 1000);
+        }, 500);
     } catch (err) {
         console.error('Failed to restart:', err);
-        showToast('❌', 'Error restarting game');
-        DOM.restartOverlay.classList.remove('active');
+        showToast('❌', 'Error restarting — try refreshing the page');
+        // Even if server fails, clear local state and reload
+        localStorage.clear();
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
     }
 }
 
@@ -823,6 +953,7 @@ async function animateNpcTurns(npcActions) {
         DOM.announcerName.style.color = npc.color;
         
         if (action.type === "manifesto" || !action.type) {
+            SoundFX.turnStart();
             DOM.announcerAction.textContent = "is thinking...";
             await sleep(800);
             
@@ -838,8 +969,25 @@ async function animateNpcTurns(npcActions) {
                 target_group_id: action.group_id,
                 shift_amount: action.shift_amount
             });
-            await sleep(2500); 
+            await sleep(1500);
+            
+            // If this NPC action has dialogue, show the dialogue popup with TTS
+            if (action.dialogue && action.dialogue.trim()) {
+                DOM.turnAnnouncerOverlay.classList.remove('active');
+                await showDialoguePopup(
+                    npc.name,
+                    action.dialogue,
+                    npc.emoji,
+                    npc.color,
+                    action.candidate_id,
+                    action.speech_style || 'neutral'
+                );
+                DOM.turnAnnouncerOverlay.classList.add('active');
+            } else {
+                await sleep(1000);
+            }
         } else if (action.type === "sabotage") {
+            SoundFX.sabotageLaunch();
             let vicName = "Someone";
             if (action.target_id === 4) vicName = "YOU";
             else {
@@ -954,19 +1102,39 @@ async function addToCampaign() {
             renderManifesto(true);
             renderBarChart();
             closePopup();
+            SoundFX.manifestoAdd();
             showToast('⚔️', `${addedCount} manifesto${addedCount > 1 ? 's' : ''} deployed!`);
 
             // Update coin count
             gameState.candidate.coins -= addedCount * 50;
             localStorage.setItem('playerCoins', gameState.candidate.coins);
             DOM.coinCount.textContent = gameState.candidate.coins.toLocaleString();
+            SoundFX.coinSpend();
+
+            // Show dialogue popup for the LAST selected manifesto with TTS
+            const lastOption = gameState.manifestoBank.length > 0 ? null : null;
+            const lastSelectedId = gameState.selectedPopupOptions[gameState.selectedPopupOptions.length - 1];
+            // Find the full manifesto data from the original bank
+            const allBank = await apiFetch('/api/all-manifestos').catch(() => []);
+            const lastManifesto = allBank.find(m => m.id === lastSelectedId);
+            
+            if (lastManifesto && lastManifesto.dialogue && lastManifesto.dialogue.trim()) {
+                await showDialoguePopup(
+                    gameState.candidate.name,
+                    lastManifesto.dialogue,
+                    '🎤',
+                    '#48b848',
+                    PLAYER_CANDIDATE_ID,
+                    lastManifesto.speech_style || 'neutral'
+                );
+            }
 
             // Let API calls finish
             await Promise.allSettled(apiSyncTasks);
             
             // NPC Turn
             try {
-                const npcRes = await apiFetch('/api/end-turn', { method: 'POST', timeoutMs: 15000 });
+                const npcRes = await apiFetch('/api/end-turn', { method: 'POST', timeoutMs: 60000 });
                 if (npcRes.npc_actions && npcRes.npc_actions.length > 0) {
                     await animateNpcTurns(npcRes.npc_actions);
                 }
@@ -1072,6 +1240,233 @@ function showToast(icon, msg) {
     setTimeout(() => DOM.toast.classList.remove('show'), 2000);
 }
 
+
+// ══════════════════════════════════
+//  TTS & DIALOGUE SYSTEM
+// ══════════════════════════════════
+
+/**
+ * Play TTS audio for a character via the server proxy.
+ * Returns an object with:
+ *   - onStarted: Promise that resolves when audio actually starts playing
+ *   - onEnded: Promise that resolves when audio finishes
+ * If muted or error, both resolve immediately.
+ */
+function playCharacterSpeech(text, candidateId, speechStyle = 'neutral') {
+    // Immediate resolve for muted/empty
+    if (gameState.isMuted || !text) {
+        return {
+            onStarted: Promise.resolve(),
+            onEnded: Promise.resolve()
+        };
+    }
+
+    let startResolve, endResolve;
+    const onStarted = new Promise(r => { startResolve = r; });
+    const onEnded = new Promise(r => { endResolve = r; });
+
+    // Fetch + play in background
+    (async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/api/tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: text,
+                    candidate_id: candidateId,
+                    speech_style: speechStyle
+                })
+            });
+
+            if (!resp.ok) {
+                console.warn('TTS request failed:', resp.status);
+                startResolve();
+                endResolve();
+                return;
+            }
+
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            gameState.currentAudio = audio;
+
+            audio.addEventListener('playing', () => {
+                startResolve();
+            }, { once: true });
+
+            audio.onended = () => {
+                URL.revokeObjectURL(url);
+                gameState.currentAudio = null;
+                endResolve();
+            };
+            audio.onerror = () => {
+                URL.revokeObjectURL(url);
+                gameState.currentAudio = null;
+                startResolve();
+                endResolve();
+            };
+
+            audio.play().catch(() => {
+                gameState.currentAudio = null;
+                startResolve();
+                endResolve();
+            });
+
+            // Safety: if 'playing' event never fires, unblock after 2s
+            setTimeout(() => { startResolve(); }, 2000);
+        } catch (err) {
+            console.warn('TTS error:', err.message);
+            startResolve();
+            endResolve();
+        }
+    })();
+
+    return { onStarted, onEnded };
+}
+
+/**
+ * Show a visual novel-style dialogue popup with typewriter effect and TTS.
+ * The typewriter only starts AFTER the voice begins playing — no desync.
+ * Blocks until user clicks to dismiss (after audio finishes or on click-to-skip).
+ * Returns a Promise that resolves when dismissed.
+ */
+function showDialoguePopup(speakerName, dialogueText, emoji, color, candidateId, speechStyle) {
+    return new Promise((resolve) => {
+        SoundFX.dialogueOpen();
+
+        // Set speaker info
+        DOM.dialogueSpeakerEmoji.textContent = emoji || '🎤';
+        DOM.dialogueSpeakerName.textContent = speakerName.toUpperCase();
+        DOM.dialogueSpeakerName.style.color = color || '#f0c040';
+        DOM.dialogueText.textContent = '';
+        DOM.dialogueText.classList.add('typing');
+        DOM.dialogueContinue.classList.remove('visible');
+        DOM.dialogueAudioIndicator.classList.remove('playing');
+
+        // Show overlay
+        DOM.dialogueOverlay.classList.add('active');
+
+        let charIndex = 0;
+        let typewriterDone = false;
+        let audioDone = false;
+        let dismissed = false;
+        let typewriterInterval = null;
+        let typewriterStarted = false;
+
+        function startTypewriter() {
+            if (typewriterStarted) return;
+            typewriterStarted = true;
+
+            // Clear loading message and begin typing
+            DOM.dialogueText.textContent = '';
+            DOM.dialogueText.classList.add('typing');
+
+            const typeSpeed = 35; // ms per character
+            typewriterInterval = setInterval(() => {
+                if (charIndex < dialogueText.length) {
+                    DOM.dialogueText.textContent += dialogueText[charIndex];
+                    charIndex++;
+                    // Auto-scroll
+                    const textArea = DOM.dialogueText.closest('.dialogue-text-area');
+                    if (textArea) textArea.scrollTop = textArea.scrollHeight;
+                } else {
+                    clearInterval(typewriterInterval);
+                    typewriterInterval = null;
+                    typewriterDone = true;
+                    DOM.dialogueText.classList.remove('typing');
+                    checkShowContinue();
+                }
+            }, typeSpeed);
+        }
+
+        // Start TTS audio — typewriter waits for it
+        DOM.dialogueAudioIndicator.classList.add('playing');
+        DOM.dialogueText.textContent = '🔊 Loading voice...';
+
+        const { onStarted, onEnded } = playCharacterSpeech(dialogueText, candidateId, speechStyle);
+
+        // When audio actually starts playing → begin the typewriter
+        onStarted.then(() => {
+            startTypewriter();
+        });
+
+        // When audio ends → mark done
+        onEnded.then(() => {
+            audioDone = true;
+            DOM.dialogueAudioIndicator.classList.remove('playing');
+            checkShowContinue();
+        }).catch(() => {
+            audioDone = true;
+            DOM.dialogueAudioIndicator.classList.remove('playing');
+            checkShowContinue();
+        });
+
+        // If muted, start typewriter immediately (no voice to wait for)
+        if (gameState.isMuted) {
+            audioDone = true;
+            DOM.dialogueAudioIndicator.classList.remove('playing');
+            startTypewriter();
+        }
+
+        function checkShowContinue() {
+            // Show continue button when BOTH typewriter and audio are done
+            // OR if audio failed/muted, just when typewriter is done
+            if (typewriterDone && (audioDone || gameState.isMuted)) {
+                DOM.dialogueContinue.classList.add('visible');
+            }
+        }
+
+        // Click to skip/dismiss
+        function onDismiss() {
+            if (dismissed) return;
+
+            if (!typewriterStarted) {
+                // Audio hasn't started yet — skip waiting, show full text
+                startTypewriter();
+                if (typewriterInterval) clearInterval(typewriterInterval);
+                typewriterInterval = null;
+                DOM.dialogueText.textContent = dialogueText;
+                DOM.dialogueText.classList.remove('typing');
+                typewriterDone = true;
+                checkShowContinue();
+                return;
+            }
+
+            if (!typewriterDone) {
+                // Skip typewriter — show full text immediately
+                if (typewriterInterval) clearInterval(typewriterInterval);
+                typewriterInterval = null;
+                DOM.dialogueText.textContent = dialogueText;
+                DOM.dialogueText.classList.remove('typing');
+                typewriterDone = true;
+                checkShowContinue();
+                return;
+            }
+
+            if (!audioDone && !gameState.isMuted) {
+                // Skip audio — stop it
+                if (gameState.currentAudio) {
+                    gameState.currentAudio.pause();
+                    gameState.currentAudio = null;
+                }
+                audioDone = true;
+                DOM.dialogueAudioIndicator.classList.remove('playing');
+                checkShowContinue();
+                return;
+            }
+
+            // Dismiss completely
+            dismissed = true;
+            SoundFX.click();
+            DOM.dialogueOverlay.classList.remove('active');
+            DOM.dialogueOverlay.removeEventListener('click', onDismiss);
+            resolve();
+        }
+
+        DOM.dialogueOverlay.addEventListener('click', onDismiss);
+    });
+}
+
 // ══════════════════════════════════
 //  ELECTION ENDGAME LOGIC
 // ══════════════════════════════════
@@ -1157,6 +1552,13 @@ function evaluateElectionResults() {
     DOM.endGameOverlay.classList.add('active');
     DOM.addManifestoBtn.style.opacity = '0.5';
     DOM.addManifestoBtn.style.pointerEvents = 'none';
+
+    // Play victory/defeat sound
+    if (candidateTotals[0].id === PLAYER_CANDIDATE_ID) {
+        SoundFX.victory();
+    } else {
+        SoundFX.defeat();
+    }
 }
 
 
@@ -1236,7 +1638,7 @@ async function executeSabotage() {
 
         // NPC Turn (same as after ADD MANIFESTO)
         try {
-            const npcRes = await apiFetch('/api/end-turn', { method: 'POST', timeoutMs: 30000 });
+            const npcRes = await apiFetch('/api/end-turn', { method: 'POST', timeoutMs: 60000 });
             if (npcRes.npc_actions && npcRes.npc_actions.length > 0) {
                 await animateNpcTurns(npcRes.npc_actions);
             }

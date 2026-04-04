@@ -1438,4 +1438,190 @@ html, body {
         font-size: 8px;
         padding: 3px 6px;
     }
+    .dialogue-box {
+        width: 95%;
+        margin: 0 auto;
+    }
+}
+
+/* ═════════════════════════════════
+   DIALOGUE POPUP – Visual Novel Style
+   ═════════════════════════════════ */
+
+.dialogue-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 24px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease-out;
+}
+.dialogue-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.dialogue-box {
+    width: 85%;
+    max-width: 800px;
+    background: var(--panel-bg);
+    border: 4px solid var(--pixel-gold);
+    box-shadow:
+        0 -4px 20px rgba(240, 192, 64, 0.15),
+        0 6px 0 var(--pixel-shadow),
+        inset 0 1px 0 rgba(255,255,255,0.08);
+    padding: 0;
+    transform: translateY(30px);
+    opacity: 0;
+    transition: transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.25s ease-out;
+}
+.dialogue-overlay.active .dialogue-box {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Inner pixel glow */
+.dialogue-box::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border: 1px solid rgba(240, 192, 64, 0.1);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Speaker name row */
+.dialogue-speaker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--panel-header);
+    border-bottom: 3px solid var(--pixel-black);
+    position: relative;
+}
+
+.dialogue-speaker-emoji {
+    font-size: 22px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.3);
+    border: 2px solid var(--pixel-black);
+    flex-shrink: 0;
+}
+
+.dialogue-speaker-name {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 12px;
+    color: var(--pixel-gold);
+    text-shadow: 1px 1px 0 var(--pixel-black);
+    letter-spacing: 1px;
+    flex: 1;
+}
+
+/* Audio waveform indicator */
+.dialogue-audio-indicator {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 20px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.dialogue-audio-indicator.playing {
+    opacity: 1;
+}
+
+.audio-bar {
+    width: 3px;
+    background: var(--pixel-gold);
+    border-radius: 1px;
+    animation: audioWave 0.8s ease-in-out infinite alternate;
+}
+.audio-bar:nth-child(1) { height: 6px; animation-delay: 0s; }
+.audio-bar:nth-child(2) { height: 12px; animation-delay: 0.15s; }
+.audio-bar:nth-child(3) { height: 18px; animation-delay: 0.3s; }
+.audio-bar:nth-child(4) { height: 10px; animation-delay: 0.45s; }
+.audio-bar:nth-child(5) { height: 14px; animation-delay: 0.6s; }
+
+@keyframes audioWave {
+    0% { height: 4px; }
+    100% { height: 20px; }
+}
+
+/* Dialogue text area */
+.dialogue-text-area {
+    padding: 16px 20px;
+    min-height: 80px;
+    max-height: 160px;
+    overflow-y: auto;
+    position: relative;
+}
+
+.dialogue-text {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    color: var(--text-light);
+    line-height: 2;
+    text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
+    margin: 0;
+}
+
+/* Typewriter cursor */
+.dialogue-text.typing::after {
+    content: '▌';
+    animation: blink 0.6s infinite;
+    color: var(--pixel-gold);
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* Continue indicator */
+.dialogue-continue {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: var(--pixel-gold);
+    text-align: center;
+    padding: 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer;
+    animation: pulseGlow 1.5s ease-in-out infinite;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    text-shadow: 1px 1px 0 var(--pixel-black);
+}
+.dialogue-continue.visible {
+    opacity: 1;
+}
+
+@keyframes pulseGlow {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+/* Scrollbar for dialogue */
+.dialogue-text-area::-webkit-scrollbar { width: 6px; }
+.dialogue-text-area::-webkit-scrollbar-track { background: transparent; }
+.dialogue-text-area::-webkit-scrollbar-thumb {
+    background: var(--pixel-gold);
+    border: 1px solid var(--pixel-black);
+}
+
+/* ═════════════════════════════════
+   MUTE BUTTON STATE
+   ═════════════════════════════════ */
+.settings-btn.muted {
+    opacity: 0.5;
+    text-decoration: line-through;
 }

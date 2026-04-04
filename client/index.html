@@ -52,6 +52,7 @@
                 <span class="coin-count" id="coinCount">1,250</span>
             </div>
             <button class="coc-btn" id="cocBtn" title="Code of Conduct">⚖️ CoC</button>
+            <button class="settings-btn" id="muteBtn" title="Toggle Sound">🔊</button>
             <button class="settings-btn restart-btn" id="restartGameBtn" title="Restart Game">🔄</button>
             <button class="settings-btn" id="settingsBtn">⚙️</button>
         </div>
@@ -328,6 +329,27 @@
             <button class="popup-action-btn" id="cocOkBtn" style="background: #f0c040; box-shadow: 0 4px 0 #c89838;">
                 <span class="popup-action-text">👍 GOT IT</span>
             </button>
+        </div>
+    </div>
+
+    <!-- ═══ DIALOGUE POPUP (Visual Novel Style) ═══ -->
+    <div class="dialogue-overlay" id="dialogueOverlay">
+        <div class="dialogue-box">
+            <div class="dialogue-speaker-row">
+                <span class="dialogue-speaker-emoji" id="dialogueSpeakerEmoji">🏗️</span>
+                <span class="dialogue-speaker-name" id="dialogueSpeakerName">Character Name</span>
+                <span class="dialogue-audio-indicator" id="dialogueAudioIndicator">
+                    <span class="audio-bar"></span>
+                    <span class="audio-bar"></span>
+                    <span class="audio-bar"></span>
+                    <span class="audio-bar"></span>
+                    <span class="audio-bar"></span>
+                </span>
+            </div>
+            <div class="dialogue-text-area">
+                <p class="dialogue-text" id="dialogueText"></p>
+            </div>
+            <div class="dialogue-continue" id="dialogueContinue">▼ CLICK TO CONTINUE</div>
         </div>
     </div>
 
