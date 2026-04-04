@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 import os
 import random
 import json
 import logging
+import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Optional
@@ -85,6 +87,30 @@ mongo_client = MongoClient(os.getenv("MONGO_URI"))
 db = mongo_client.panchayat_db
 
 # ══════════════════════════════════
+#  ELEVENLABS VOICE CONFIG
+# ══════════════════════════════════
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
+
+# Fallback voice mapping (also stored in MongoDB per candidate)
+# Custom Indian generated voices: Male: 76erronSBRzQKnz10Li9, Female: K2Byg54sHB1oHegvENtI
+CHARACTER_VOICES = {
+    0: "76erronSBRzQKnz10Li9",  # Vikas Purush  → Male
+    1: "76erronSBRzQKnz10Li9",  # Dharma Rakshak → Male
+    2: "K2Byg54sHB1oHegvENtI",  # Jan Neta      → Female
+    3: "K2Byg54sHB1oHegvENtI",  # Mukti Devi    → Female
+    4: "76erronSBRzQKnz10Li9",  # Player        → Male
+}
+
+def get_voice_id(candidate_id: int) -> str:
+    """Get voice_id from MongoDB first, fallback to hardcoded map."""
+    cand = db.candidates.find_one({"id": candidate_id}, {"voice_id": 1})
+    if cand and cand.get("voice_id"):
+        return cand["voice_id"]
+    return CHARACTER_VOICES.get(candidate_id, "76erronSBRzQKnz10Li9")
+
+# ══════════════════════════════════
 #  PYDANTIC MODELS
 # ══════════════════════════════════
 
@@ -99,6 +125,11 @@ class PlayerWeaknessPayload(BaseModel):
 class PlayerSabotageRequest(BaseModel):
     target_id: int
     sabotage_prompt: str
+
+class TTSRequest(BaseModel):
+    text: str
+    candidate_id: int
+    speech_style: Optional[str] = "neutral"
 
 # ══════════════════════════════════
 #  ARMORIQ ELECTION COMMISSIONER
@@ -338,6 +369,80 @@ async def get_candidates_info():
     """Returns public candidate data including shield status for UI."""
     candidates = list(db.candidates.find({}, {"_id": 0, "weakness_desc": 0}))
     return candidates
+
+
+# ══════════════════════════════════
+#  ELEVENLABS TTS ENDPOINT
+# ══════════════════════════════════
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    """
+    Proxy TTS request to ElevenLabs API.
+    Returns audio/mpeg stream for playback on client.
+    """
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=500, detail="ElevenLabs API key not configured")
+
+    voice_id = get_voice_id(req.candidate_id)
+
+    # Map speech_style to voice_settings adjustments
+    style_settings = {
+        "visionary":     {"stability": 0.4, "similarity_boost": 0.8, "style": 0.7},
+        "inspirational": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.8},
+        "emotional":     {"stability": 0.3, "similarity_boost": 0.9, "style": 0.9},
+        "compassionate": {"stability": 0.5, "similarity_boost": 0.85, "style": 0.6},
+        "reformist":     {"stability": 0.55, "similarity_boost": 0.75, "style": 0.5},
+        "grassroots":    {"stability": 0.45, "similarity_boost": 0.8, "style": 0.65},
+        "aggressive":    {"stability": 0.25, "similarity_boost": 0.9, "style": 0.95},
+        "nationalist":   {"stability": 0.4, "similarity_boost": 0.85, "style": 0.75},
+        "neutral":       {"stability": 0.5, "similarity_boost": 0.75, "style": 0.5},
+    }
+    settings = style_settings.get(req.speech_style, style_settings["neutral"])
+
+    payload = {
+        "text": req.text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": settings["stability"],
+            "similarity_boost": settings["similarity_boost"],
+            "style": settings["style"],
+            "use_speaker_boost": True
+        }
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}",
+                headers={
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg"
+                },
+                json=payload
+            )
+            if resp.status_code != 200:
+                logger.error(f"ElevenLabs API error: {resp.status_code} {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail=f"ElevenLabs error: {resp.text[:200]}")
+
+            return Response(
+                content=resp.content,
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": "inline"}
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="ElevenLabs API timeout")
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/voice-map")
+async def get_voice_map():
+    """Return the voice_id mapping for all candidates (for client-side caching)."""
+    candidates = list(db.candidates.find({}, {"_id": 0, "id": 1, "voice_id": 1, "name": 1}))
+    return {str(c["id"]): {"voice_id": c.get("voice_id", CHARACTER_VOICES.get(c["id"], "")), "name": c["name"]} for c in candidates}
 
 
 # ══════════════════════════════════
@@ -583,7 +688,9 @@ Example:
             "manifesto_id": claimed["id"],
             "title": claimed["title"],
             "group_id": group_id,
-            "shift_amount": shift_amount
+            "shift_amount": shift_amount,
+            "dialogue": claimed.get("dialogue", ""),
+            "speech_style": claimed.get("speech_style", "neutral")
         })
 
     return {"status": "success", "npc_actions": actions}
