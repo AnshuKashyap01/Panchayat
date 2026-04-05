@@ -408,12 +408,13 @@ Built at **HackByte 4.0** for the **Claw & Shield Track** (ArmorIQ x OpenClaw).
 
 ## 🎬 Demo Video
 
+👉 Watch the demo: [Google Drive Link](https://drive.google.com/file/d/1DpNUu3DabblHGRBNj5I4yMIdJ_yr1hDe/view?usp=sharing)
+
 <p align="center">
-  <video width="80%" controls>
-    <source src="client/assets/final.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
+  <a href="https://drive.google.com/file/d/1DpNUu3DabblHGRBNj5I4yMIdJ_yr1hDe/view?usp=sharing">
+  </a>
 </p>
+
 
 ---
 
