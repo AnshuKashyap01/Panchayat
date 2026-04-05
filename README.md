@@ -401,3 +401,19 @@ Built at **HackByte 4.0** for the **Claw & Shield Track** (ArmorIQ x OpenClaw).
 ---
 
 *"Democracy is not just a right — it is a skill. Panchayat lets you practice it."*
+
+
+
+---
+
+## 🎬 Demo Video
+
+<p align="center">
+  <video width="80%" controls>
+    <source src="client/assets/final.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</p>
+
+---
+
