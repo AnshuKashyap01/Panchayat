@@ -11,6 +11,14 @@ const NUM_CANDIDATES = 5;                // 5 candidates (0-3 NPC, 4 Player)
 const GROUP_CAP = 20.0;                  // Each voter group = 20% of total population
 const INITIAL_SHARE = 4.0;              // GROUP_CAP / NUM_CANDIDATES = 4% each
 
+// ── SESSION ID (Persistent per browser) ──
+let sessionId = localStorage.getItem('panchayat_session_id');
+if (!sessionId) {
+    sessionId = 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    localStorage.setItem('panchayat_session_id', sessionId);
+}
+console.log(`📡 Session ID: ${sessionId}`);
+
 // ── Voter Group Mapping (matches init_db.py) ──
 const VOTER_GROUPS = [
     { id: 0, name: 'Farmers', icon: '🌾', color: '#48b848' },
@@ -450,11 +458,18 @@ async function apiFetch(endpoint, options = {}) {
     const timeoutMs = options.timeoutMs || 15000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // default 15s timeout
 
+    // Add Session ID Header
+    const headers = {
+        'Content-Type': 'application/json',
+        'X-Session-ID': sessionId,
+        ...(options.headers || {})
+    };
+
     try {
         const res = await fetch(`${API_BASE}${endpoint}`, {
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            ...options
+            ...options,
+            headers: headers,
+            signal: controller.signal
         });
         clearTimeout(timeoutId);
         if (!res.ok) {
@@ -1357,9 +1372,9 @@ async function animateNpcTurns(npcActions) {
                     let damagePct = action.multiplier ? Math.round(action.multiplier * 100) : '??';
                     
                     // FIXED: Play the victim's voice for the deepfake dialogue ONLY if not defended!
-                    if (action.dialogue && (action.vic_id !== undefined)) {
-                        const profile = getCharacterProfile(action.vic_id);
-                        await showDialoguePopup(profile.name, action.dialogue, profile.emoji, profile.color, action.vic_id);
+                    if (action.dialogue && (action.target_id !== undefined)) {
+                        const profile = getCharacterProfile(action.target_id);
+                        await showDialoguePopup(profile.name, action.dialogue, profile.emoji, profile.color, action.target_id);
                     }
                     
                     DOM.announcerAction.innerHTML += sabText + `<span style="color:#e04848; font-size:14px; font-weight:bold;">🎭 DEEPFAKE SUCCESS!</span><br><span style="color:#e04848; font-size:11px;">${vicName} lost ${damagePct}% voter share!</span>`;
@@ -1370,7 +1385,18 @@ async function animateNpcTurns(npcActions) {
                 let damagePct = action.multiplier ? Math.round(action.multiplier * 100) : '??';
                 DOM.announcerAction.innerHTML += sabText + `<span style="color:#e04848; font-size:14px; font-weight:bold;">💥 SABOTAGE SUCCESS!</span><br><span style="color:#e8a040; font-size:11px;">${action.dialogue || ''}</span><br><span style="color:#e04848; font-size:8px;">${vicName} lost ${damagePct}% voter share!</span>`;
             }
-            await sleep(2000);
+            
+            // Wait for user to click overlay to continue
+            DOM.announcerAction.innerHTML += `<br><br><span class="pulsing-hint" style="color:#fff; font-size:10px; cursor:pointer;"> >>> CLICK TO CONTINUE <<< </span>`;
+            
+            await new Promise(resolve => {
+                const proceed = () => {
+                    DOM.turnAnnouncerOverlay.removeEventListener('click', proceed);
+                    resolve();
+                };
+                DOM.turnAnnouncerOverlay.addEventListener('click', proceed);
+            });
+            await sleep(300);
         }
     }
 
@@ -1730,6 +1756,8 @@ function playCharacterSpeech(text, candidateId, speechStyle = 'neutral') {
 
             // Safety: if 'playing' event never fires, unblock after 2s
             setTimeout(() => { startResolve(); }, 2000);
+            // Safety: if 'ended' event never fires, unblock after 10s
+            setTimeout(() => { endResolve(); }, 10000);
         } catch (err) {
             console.warn('TTS error:', err.message);
             startResolve();
@@ -2058,21 +2086,26 @@ async function executeSabotage() {
             DOM.sabotageResultTitle.style.color = '#e04848';
             DOM.sabotageResultMessage.textContent = result.message;
             DOM.sabotageResultDialogue.textContent = `Reason: ${result.reason}`;
+            DOM.sabotageResultOverlay.classList.add('active');
         } else {
             let damagePct = result.multiplier ? Math.round(result.multiplier * 100) : '??';
-            DOM.sabotageResultTitle.textContent = '💥 SABOTAGE SUCCESS!';
+            
+            // If it's a deepfake, show the Scanning animation first
+            if (result.is_deepfake) {
+                await performAuthCheck(result.target_name, true, true);
+                
+                if (result.dialogue && (result.target_id !== undefined)) {
+                    const profile = getCharacterProfile(result.target_id);
+                    await showDialoguePopup(profile.name, result.dialogue, profile.emoji, profile.color, result.target_id);
+                }
+            }
+            
+            DOM.sabotageResultTitle.textContent = result.is_deepfake ? '🎭 DEEPFAKE SUCCESS!' : '💥 SABOTAGE SUCCESS!';
             DOM.sabotageResultTitle.style.color = '#48b848';
             DOM.sabotageResultMessage.textContent = `${result.target_name} lost ${damagePct}% voter share!`;
             DOM.sabotageResultDialogue.textContent = result.dialogue || '';
-
-            // FIXED: Use showDialoguePopup for Deepfakes to show the visual novel-style box and audio!
-            if (result.is_deepfake && result.dialogue && (result.target_id !== undefined)) {
-                const profile = getCharacterProfile(result.target_id);
-                console.log("Deepfake dialogue trigger:", result.target_id, result.dialogue);
-                await showDialoguePopup(profile.name, result.dialogue, profile.emoji, profile.color, result.target_id);
-            }
+            DOM.sabotageResultOverlay.classList.add('active');
         }
-        DOM.sabotageResultOverlay.classList.add('active');
 
         // Re-sync shares after sabotage
         await loadVoterStanding();
@@ -2164,23 +2197,43 @@ async function buyWatermarkAction() {
     }
 }
 
-async function performAuthCheck(candidateName, isSuccess) {
+async function performAuthCheck(candidateName, isSuccess, autoClose = false) {
     DOM.turnAnnouncerOverlay.classList.add('active');
     DOM.announcerName.textContent = "🔍 AUTHENTICITY CHECK";
     DOM.announcerAction.style.color = "#4088e0";
     DOM.announcerAction.innerHTML = `Analyzing ${candidateName}'s speech waves...<br><span style="font-size:10px; color:#555;">[Scanning for 19kHz signature]</span>`;
     
-    await sleep(1500);
+    // Create a skippable sleep
+    const skippableSleep = (ms) => {
+        return new Promise(resolve => {
+            const skip = () => {
+                clearTimeout(timeout);
+                DOM.turnAnnouncerOverlay.removeEventListener('click', skip);
+                resolve();
+            };
+            const timeout = setTimeout(() => {
+                DOM.turnAnnouncerOverlay.removeEventListener('click', skip);
+                resolve();
+            }, ms);
+            DOM.turnAnnouncerOverlay.addEventListener('click', skip);
+        });
+    };
+
+    await skippableSleep(1500);
     
     if (isSuccess) {
         soundManager.play('round_chime');
-        DOM.announcerAction.innerHTML = `<span style="color:#48b848; font-size:16px;">✅ AUTHENTIC</span><br>Audio contains official watermark.`;
+        DOM.announcerAction.innerHTML = `<span style="color:#48b848; font-size:16px;">✅ AUTHENTIC</span><br>Audio contains official watermark.<br><br><span class="pulsing-hint" style="font-size:9px; color:#ccc;">[Click to continue]</span>`;
     } else {
         soundManager.play('error_buzz');
-        DOM.announcerAction.innerHTML = `<span style="color:#e04848; font-size:16px;">❌ DEEPFAKE DETECTED!</span><br>No digital signature found.`;
+        DOM.announcerAction.innerHTML = `<span style="color:#e04848; font-size:16px;">❌ DEEPFAKE DETECTED!</span><br>No digital signature found.<br><br><span class="pulsing-hint" style="font-size:9px; color:#ccc;">[Click to continue]</span>`;
     }
     
-    await sleep(2000);
+    await skippableSleep(2000);
+
+    if (autoClose) {
+        DOM.turnAnnouncerOverlay.classList.remove('active');
+    }
 }
 
 
